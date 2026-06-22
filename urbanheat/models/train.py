@@ -299,6 +299,7 @@ class LSTModel:
         self._model: Any = None
         self._resolved_backend: str | None = None
         self.monotone_cst_: dict[str, int] = {}
+        self._X_ref: np.ndarray | None = None
         self._fitted = False
 
     # ----- backend construction -----------------------------------------
@@ -457,6 +458,11 @@ class LSTModel:
         )
         self._model, self._resolved_backend = self._build_backend(X.shape[1])
         self._model.fit(X, y)
+        # cache a small sample of the training rows so feature_importances_ can
+        # fall back to a label-free prediction-sensitivity importance for
+        # backends (e.g. HistGradientBoosting) that expose no native attribute.
+        cap = min(X.shape[0], 1024)
+        self._X_ref = X[:cap].copy()
         self._fitted = True
         return self
 
@@ -565,15 +571,48 @@ class LSTModel:
     # ----- introspection ------------------------------------------------
     @property
     def feature_importances_(self) -> np.ndarray:
-        """Backend feature importances ``(P,)`` (permutation fallback if absent)."""
+        """Backend feature importances ``(P,)`` (permutation fallback if absent).
+
+        Tree backends with a native ``feature_importances_`` (RandomForest,
+        XGBoost, LightGBM, CatBoost, the numpy fallback) return it directly.
+        ``HistGradientBoostingRegressor`` has none, so a fast label-free
+        prediction-sensitivity permutation over the cached training sample is
+        used instead (the full model-agnostic route lives in
+        :mod:`urbanheat.models.attribution`).
+        """
         if not self._fitted:
             raise RuntimeError("LSTModel is not fitted; call .fit() first.")
         imp = getattr(self._model, "feature_importances_", None)
         if imp is not None:
             return np.asarray(imp, dtype=np.float64)
-        # backends without importances (rare) -> zeros; attribution module has
-        # permutation importance as the proper model-agnostic route.
-        return np.zeros(len(self.feature_names_), dtype=np.float64)
+        return self._permutation_sensitivity()
+
+    def _permutation_sensitivity(
+        self, n_repeats: int = 5, seed: int = 0
+    ) -> np.ndarray:
+        """Label-free permutation importance over the cached training sample.
+
+        Importance of feature ``j`` = mean absolute change in the model's own
+        prediction when column ``j`` is shuffled. Returns a normalised ``(P,)``
+        vector (sums to 1 when non-zero).
+        """
+        p = len(self.feature_names_)
+        if self._X_ref is None or self._X_ref.shape[0] < 4:
+            return np.zeros(p, dtype=np.float64)
+        rng = np.random.default_rng(seed)
+        X = self._X_ref
+        base = np.asarray(self._model.predict(X), dtype=np.float64)
+        scores = np.zeros(p, dtype=np.float64)
+        for j in range(p):
+            acc = 0.0
+            for _ in range(n_repeats):
+                Xp = X.copy()
+                Xp[:, j] = rng.permutation(Xp[:, j])
+                acc += float(np.mean(np.abs(
+                    np.asarray(self._model.predict(Xp), dtype=np.float64) - base)))
+            scores[j] = acc / n_repeats
+        total = scores.sum()
+        return scores / total if total > 0 else scores
 
     def importances_by_name(self) -> dict[str, float]:
         """Return ``{feature_name: importance}`` from the backend importances."""

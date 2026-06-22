@@ -585,7 +585,9 @@ def gap_fill(
     if gap.any():
         filled = y.copy()
         # seed remaining gaps with the global mean so the relaxation converges
-        gmean = float(np.nanmean(filled)) if np.isfinite(np.nanmean(filled)) else 0.0
+        with np.errstate(invalid="ignore"):
+            _m = np.nanmean(filled) if np.isfinite(filled).any() else np.nan
+        gmean = float(_m) if np.isfinite(_m) else 0.0
         filled[~np.isfinite(filled)] = gmean
         for _ in range(max_iter):
             if not gap.any():

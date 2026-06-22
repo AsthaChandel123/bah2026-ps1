@@ -390,15 +390,17 @@ def _coerce_portfolio(opt_result: Any, fs: "FeatureStack") -> list[dict[str, Any
     for r in records:
         if not isinstance(r, dict):
             continue
-        t = str(r.get("type", r.get("intervention", "intervention")))
+        t = str(r.get("type", r.get("intervention_type",
+                r.get("intervention", "intervention"))))
         dC = r.get("delta_C", r.get("delta_c", r.get("delta_lst",
-                   r.get("dC", r.get("estimated_dC", 0.0)))))
+                   r.get("dC", r.get("estimated_dC",
+                   r.get("estimated_delta_lst_C", 0.0))))))
         try:
             dC = float(dC)
         except Exception:
             dC = 0.0
-        x = r.get("x")
-        y = r.get("y")
+        x = r.get("x", r.get("lon", r.get("longitude")))
+        y = r.get("y", r.get("lat", r.get("latitude")))
         if x is None or y is None:
             geom = r.get("geometry")
             cx = getattr(geom, "x", None)

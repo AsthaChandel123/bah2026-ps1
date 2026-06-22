@@ -28,7 +28,10 @@ pure-numpy monotone gradient-boosting regressor (axis-aligned stumps with
 sign-projected leaf updates) is used so training, prediction and the whole
 attribution / validation stack still run on numpy alone. ``xgboost`` /
 ``lightgbm`` / ``catboost`` / ``joblib`` are imported lazily inside the methods
-that use them.
+that use them. The ``'auto'`` default prefers a natively-monotone compiled GBM
+(xgboost/lightgbm) when present and otherwise resolves to ``'rf'`` on a
+sklearn-only stack — fast and free of the sklearn-1.9.0 HistGB nested-OpenMP
+stall, with monotonicity enforced by the post-hoc physics-consistency audit.
 
 Public API: :class:`LSTModel` plus the Module Interface Contract functions
 :func:`train_model`, :func:`predict_lst`, :func:`save_model`, :func:`load_model`
@@ -242,10 +245,14 @@ class LSTModel:
     ----------
     backend:
         One of ``'rf'``, ``'gbm'``, ``'xgboost'``, ``'lightgbm'``, ``'catboost'``,
-        or ``'auto'`` (default). ``'auto'`` picks ``'gbm'`` (monotone
-        ``HistGradientBoostingRegressor``) when sklearn is present, otherwise the
-        pure-numpy monotone fallback. ``'rf'`` => ``RandomForestRegressor``
-        (no native monotonicity -> post-hoc audit + warning).
+        or ``'auto'`` (default). ``'auto'`` prefers a natively-monotone compiled
+        GBM (``xgboost`` -> ``lightgbm``) when importable; otherwise it resolves to
+        ``'rf'`` (``RandomForestRegressor``) on a sklearn-only stack — fast and
+        free of the sklearn-1.9.0 HistGB nested-OpenMP stall, with driver-sign
+        monotonicity enforced post-hoc by the physics-consistency audit — and to
+        the pure-numpy monotone fallback when sklearn is absent. ``'gbm'`` selects
+        the monotone ``HistGradientBoostingRegressor`` explicitly (iterations
+        capped for speed).
     predictors:
         Predictor names; defaults to :data:`DEFAULT_PREDICTORS` and is finalised
         to the columns actually present at ``fit`` time when fit from a stack.
@@ -304,9 +311,29 @@ class LSTModel:
 
     # ----- backend construction -----------------------------------------
     def _resolve_backend_name(self) -> str:
+        """Resolve the ``'auto'`` backend to a fast, reliable, contract-safe learner.
+
+        Preference order for ``'auto'``: a natively-monotone compiled GBM
+        (``xgboost`` -> ``lightgbm``) when importable, else
+        ``RandomForestRegressor`` (``'rf'``) when sklearn is present, else the
+        pure-numpy monotone fallback. ``'rf'`` is the default on a bare
+        numpy/scipy/sklearn stack because sklearn 1.9.0's
+        ``HistGradientBoostingRegressor`` ('gbm') can stall under a nested-OpenMP
+        deadlock in some sandboxes; RandomForest fits the smooth response surface
+        in well under a second and its driver-sign monotonicity is guaranteed
+        post-hoc by the physics-consistency audit (:meth:`physics_consistency`).
+        ``'gbm'`` / ``'xgboost'`` / ``'lightgbm'`` / ``'catboost'`` remain
+        explicit opt-ins.
+        """
         if self.backend != "auto":
             return self.backend
-        return "gbm" if _have("sklearn") else "numpy"
+        if _have("xgboost"):
+            return "xgboost"
+        if _have("lightgbm"):
+            return "lightgbm"
+        if _have("sklearn"):
+            return "rf"
+        return "numpy"
 
     def _build_backend(self, n_features: int) -> tuple[Any, str]:
         """Instantiate the regression backend; returns ``(estimator, name)``."""
@@ -367,11 +394,17 @@ class LSTModel:
             if name == "gbm":
                 from sklearn.ensemble import HistGradientBoostingRegressor  # lazy
 
+                # Cap boosting iterations: sklearn 1.9.0 HistGB is slow per-iter in
+                # this environment, so keep <=150 and rely on OMP_NUM_THREADS=1 to
+                # avoid the nested-OpenMP stall. Early stopping trims further.
+                max_iter = min(int(self.n_estimators), 150)
                 params = dict(
-                    max_iter=self.n_estimators,
+                    max_iter=max_iter,
                     learning_rate=self.learning_rate,
                     max_depth=self.max_depth,
                     random_state=self.seed,
+                    early_stopping=True,
+                    n_iter_no_change=10,
                 )
                 if self.monotonic:
                     params["monotonic_cst"] = [int(s) for s in signs_vec]

@@ -436,6 +436,12 @@ def synthesize_lst(drivers: "dict[str, np.ndarray]") -> "np.ndarray":
     emitted = k_net * (1.0 - sink) + emis * l_down + qf
     emitted = np.clip(emitted, emis * 5.670374419e-8 * (233.15) ** 4, None)
     lst_rad = lst_from_longwave(emitted, emis, longwave_down=l_down)   # degC
+    # The radiative inversion gives a physically-correct *spatial pattern* but an
+    # inflated absolute level (an isolated dry surface in radiative equilibrium
+    # runs very hot; a real pixel exports much more via convection/storage). Use
+    # it as a standardized, zero-mean pattern so it sets the relative structure
+    # (albedo/K_down/SVF/moisture response) without dominating the magnitude.
+    rad_pattern = (lst_rad - lst_rad.mean()) / (lst_rad.std() + 1e-6)
 
     # --- (b) explicit correctly-signed driver perturbations -------------
     # additive degC terms; magnitudes chosen for a realistic intra-urban spread
@@ -449,7 +455,7 @@ def synthesize_lst(drivers: "dict[str, np.ndarray]") -> "np.ndarray":
         - 6.0 * np.clip(ndvi, -0.2, 0.9)    # + NDVI -> cooler
         - 5.0 * tree             # + tree canopy -> cooler
         - 4.0 * green            # + vegetation fraction -> cooler
-        - 9.0 * water            # + water -> much cooler (evaporative)
+        - 12.0 * water           # + water -> much cooler (strong evaporative island)
         - 18.0 * (albedo - 0.18)  # + albedo -> cooler (relative to typical 0.18)
         - 0.05 * et              # + evapotranspiration -> cooler
         - 0.30 * np.clip(wind - 2.5, -2.0, 4.0)   # + wind -> cooler
@@ -464,7 +470,14 @@ def synthesize_lst(drivers: "dict[str, np.ndarray]") -> "np.ndarray":
     noise = gaussian_filter(rng.standard_normal(shape), sigma=1.2, mode="reflect")
     noise = 0.6 * noise / (noise.std() + 1e-9)
 
-    lst = 0.55 * lst_rad + 0.45 * air_t + dT + 0.8 * grad + noise
+    # --- (d) assemble at a realistic absolute level ----------------------
+    # Anchor to the downscaled air temperature plus a typical midday surface
+    # excess (Ts - Ta ~ +8 degC over a mixed city; larger over dry built-up,
+    # near-zero over water), add the radiative spatial pattern and the explicit
+    # SEB-signed perturbations. Yields pre-monsoon daytime LST ~ low-30s to low-
+    # 50s degC with clear hotspots and cool islands.
+    surface_excess = 8.0 + 3.0 * imperv - 6.0 * water - 2.0 * green
+    lst = air_t + surface_excess + 2.0 * rad_pattern + dT + 0.8 * grad + noise
     return np.asarray(lst, dtype=np.float32)
 
 

@@ -262,17 +262,59 @@ def spatial_cv(
     Wraps :func:`spatial_block_cv` with the contract argument order
     (model factory first; ``X``/``y`` may be pandas) and always returns a
     ``pandas.DataFrame`` with the :data:`VALIDATION_METRICS` columns.
+
+    Robust to non-numeric predictor columns (e.g. a string LULC/LCZ class label,
+    ``<U21`` dtype): only numeric feature columns enter the numeric reductions, so
+    a mixed-dtype ``DataFrame`` never trips ``add.reduce`` over text. ``coords``
+    are coerced to ``float`` (pandas or numpy input).
     """
-    Xv = np.asarray(getattr(X, "values", X), dtype=np.float64)
-    yv = np.asarray(getattr(y, "values", y), dtype=np.float64)
+    Xv = _numeric_matrix(X)
+    yv = np.asarray(getattr(y, "values", y), dtype=np.float64).ravel()
+    coords_arr = np.asarray(getattr(coords, "values", coords), dtype=np.float64)
     return spatial_block_cv(
-        Xv, yv, coords,
+        Xv, yv, coords_arr,
         model_factory=model_factory,
         n_splits=n_splits,
         block_size=block_size,
         seed=seed,
         return_dataframe=True,
     )
+
+
+def _numeric_matrix(X: Any) -> np.ndarray:
+    """Coerce a feature container to a 2-D float matrix using numeric columns only.
+
+    Accepts a ``pandas.DataFrame`` (drops non-numeric columns such as a ``<U21``
+    string LULC label so they never reach ``add.reduce``), a structured/object
+    numpy array, or a plain numeric array/list. Always returns a 2-D
+    ``float64`` array.
+    """
+    # pandas DataFrame: keep only numeric dtypes.
+    cols = getattr(X, "columns", None)
+    if cols is not None and hasattr(X, "select_dtypes"):
+        Xn = X.select_dtypes(include=[np.number])
+        if Xn.shape[1] == 0:  # no numeric columns -> coerce what we can
+            Xn = X.apply(__import__("pandas").to_numeric, errors="coerce")
+        arr = np.asarray(Xn.values, dtype=np.float64)
+        return arr if arr.ndim == 2 else arr.reshape(arr.shape[0], -1)
+    # numpy / list path.
+    arr = np.asarray(getattr(X, "values", X))
+    if arr.dtype.kind in ("U", "S", "O"):
+        # mixed/object array: drop columns that cannot be cast to float.
+        arr2 = np.atleast_2d(arr)
+        if arr2.shape[0] == 1 and arr.ndim == 1:
+            arr2 = arr.reshape(-1, 1)
+        keep_cols: list[np.ndarray] = []
+        for j in range(arr2.shape[1]):
+            try:
+                keep_cols.append(arr2[:, j].astype(np.float64))
+            except (TypeError, ValueError):
+                continue
+        if keep_cols:
+            return np.column_stack(keep_cols)
+        return np.zeros((arr2.shape[0], 0), dtype=np.float64)
+    out = np.asarray(arr, dtype=np.float64)
+    return out if out.ndim == 2 else out.reshape(out.shape[0], -1)
 
 
 # ===========================================================================

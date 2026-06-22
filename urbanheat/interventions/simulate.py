@@ -684,8 +684,17 @@ def _predict_grid(model: Any, fs: dm.FeatureStack, build_feature_table: Any = No
     # 4. pure-numpy fallback predictor grid
     predictors = _default_predictors(fs)
     X = _numpy_predictor_grid(fs, predictors)
-    yhat = np.asarray(model.predict(X), dtype=np.float64)
-    return yhat.reshape(H, W)
+    try:
+        yhat = np.asarray(model.predict(X), dtype=np.float64)
+        return yhat.reshape(H, W)
+    except Exception as exc:  # actionable error rather than a deep matmul trace
+        raise ValueError(
+            "Could not obtain a full-grid prediction from the model. The model "
+            "exposes neither a working `.predict_grid(fs)` (the §11.5 contract) "
+            "nor a `.predict(X)` compatible with the default predictor set "
+            f"({predictors!r}). Pass a matching `build_feature_table` to "
+            "predict_delta_lst, or give the model a `.predict_grid` method."
+        ) from exc
 
 
 def _split_feature_table(ft: Any) -> tuple[np.ndarray, list[str] | None]:

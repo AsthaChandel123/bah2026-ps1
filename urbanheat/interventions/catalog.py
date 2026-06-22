@@ -26,7 +26,7 @@ Design rules honoured (see ARCHITECTURE §2, §9, §11.6):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np

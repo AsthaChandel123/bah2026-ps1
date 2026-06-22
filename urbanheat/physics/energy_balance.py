@@ -391,8 +391,7 @@ def physics_lst(fs: "FeatureStack") -> "np.ndarray":
     """
     from urbanheat.datamodel import (
         AIR_TEMP, ALBEDO, EMISSIVITY, GREEN_FRAC, IMPERVIOUS_FRAC, LONGWAVE_DOWN,
-        LST, REL_HUMIDITY, ROUGHNESS_LENGTH, SOIL_MOISTURE, SOLAR_RADIATION,
-        TREE_FRAC, WATER_FRAC, WIND_SPEED,
+        SOIL_MOISTURE, SOLAR_RADIATION, TREE_FRAC, WATER_FRAC, WIND_SPEED,
     )
 
     sigma = _phys()["STEFAN_BOLTZMANN"]
@@ -408,8 +407,6 @@ def physics_lst(fs: "FeatureStack") -> "np.ndarray":
     eps = _g(EMISSIVITY, 0.95)
     air_c = _g(AIR_TEMP, 30.0)
     wind = _g(WIND_SPEED, 2.5)
-    z0 = _g(ROUGHNESS_LENGTH, 0.5)
-    rh = _g(REL_HUMIDITY, 45.0)
 
     # downwelling longwave: measured if present, else Swinbank from air temp
     if fs.has(LONGWAVE_DOWN):
@@ -417,33 +414,41 @@ def physics_lst(fs: "FeatureStack") -> "np.ndarray":
     else:
         l_down = 5.31e-13 * _c2k(air_c) ** 6
 
-    # surface resistance r_s falls with vegetation & soil moisture (more Q_E).
     green = _g(GREEN_FRAC, 0.2)
     tree = _g(TREE_FRAC, 0.1)
     water = _g(WATER_FRAC, 0.0)
     imperv = _g(IMPERVIOUS_FRAC, 0.4)
     sm = _g(SOIL_MOISTURE, 0.2)
     veg = np.clip(green + 0.5 * tree, 0.0, 1.0)
-    # r_s: ~20 s/m over wet vegetation -> ~5000 s/m over dry impervious.
-    r_s = 20.0 + 4000.0 * (1.0 - veg) * (1.0 - np.clip(sm / 0.4, 0.0, 1.0))
-    r_s = np.where(water > 0.5, 10.0, r_s)
 
-    # available energy split: use air temp as the reference skin for the flux
-    # estimate (one Newton step is plenty for a smooth backbone trend).
+    # Available energy at the surface (NARP-style): absorbed shortwave + net
+    # longwave evaluated against the AIR temperature as the radiative reference.
     k_net = shortwave_net(albedo, k_down)
-    q_h = sensible_heat(air_c, air_c, wind, z0)  # ~0 at reference; small bias ok
-    q_e = latent_heat(air_c, air_c, rh, wind, z0, surface_resistance=r_s)
-    # storage from net radiation estimate at reference temperature
-    q_star_ref = k_net + eps * (l_down - sigma * _c2k(air_c) ** 4)
-    dqs = storage_heat_ohm(
-        q_star_ref,
-        {"impervious_frac": imperv, "green_frac": green,
-         "tree_frac": tree, "water_frac": water},
-    )
+    q_star = k_net + eps * (l_down - sigma * _c2k(air_c) ** 4)
     q_f = anthropogenic_heat_flux(fs)
+    avail = q_star + q_f                                  # energy to be partitioned
 
-    # invert eps sigma Ts^4 = absorbed - turbulent - storage + Q_F
-    emitted = k_net + eps * l_down - q_h - q_e - dqs + q_f
+    # LUMPS/equilibrium closure: the turbulent (Q_H + Q_E) + storage (dQ_S) export
+    # is a FRACTION of the available energy rather than a flux evaluated at the
+    # (unknown) skin temperature — this avoids the linearization overshoot of
+    # evaluating Q_H,Q_E at Ts=Ta (which would export ~0 and bake the surface).
+    # The non-emitted fraction (what is re-radiated as longwave) is SMALL over
+    # well-watered/vegetated/windy surfaces (efficient turbulent cooling) and
+    # LARGER over dry, impervious, calm pixels (energy piles into storage +
+    # sensible heat -> hotter skin). Bounded to a physical band.
+    evaporative_fraction = np.clip(
+        0.30 + 0.55 * veg + 0.62 * water
+        + 0.30 * np.clip(sm / 0.4, 0.0, 1.0)
+        + 0.08 * np.clip(wind / 5.0, 0.0, 1.0),
+        0.10, 0.92,
+    )
+    storage_fraction = np.clip(0.35 * imperv + 0.08, 0.0, 0.45)
+    # residual fraction of available energy that must leave as ADDED longwave
+    # emission above the atmospheric reference level (the daytime skin excess).
+    radiated_fraction = np.clip(1.0 - evaporative_fraction - storage_fraction, 0.02, 0.70)
+
+    # eps sigma Ts^4 = eps sigma Ta^4 + radiated_fraction * avail
+    emitted = eps * sigma * _c2k(air_c) ** 4 + radiated_fraction * avail
     emitted = np.clip(emitted, eps * sigma * _c2k(-40.0) ** 4, None)
     ts_k = np.power(emitted / (eps * sigma), 0.25)
     return _k2c(ts_k).astype(np.float64)
@@ -456,6 +461,17 @@ def seb_residual(fs: "FeatureStack") -> "np.ndarray":
     everywhere. Reads/derives ``NET_RADIATION`` (via :func:`net_radiation` if
     absent) and the turbulent / storage / anthropogenic terms from the stack with
     sensible defaults. Returns a 2-D array of the absolute residual.
+
+    Note: on the **synthetic** stack the residual is *not* near zero (it sits at a
+    few hundred W/m^2). The synthetic LST is generated from the driver->dLST sign
+    table (:func:`expected_lst_gradient_signs`), not by inverting a closed SEB, so
+    the bulk-aerodynamic ``Q_H``/``Q_E`` here are evaluated with independent
+    default exchange coefficients rather than the ones implied by that LST. This
+    figure is therefore a *diagnostic* of temperature-dependent flux closure under
+    those defaults — useful for spotting gross sign/magnitude errors — and not a
+    target to be driven to zero; doing so would require co-fitting the flux
+    parameterisation to the same LST field (the job of the optional SEB-closure
+    PINN loss), which is out of scope for this static check.
     """
     from urbanheat.datamodel import (
         AIR_TEMP, IMPERVIOUS_FRAC, GREEN_FRAC, LST, NET_RADIATION,

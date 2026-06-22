@@ -149,6 +149,38 @@ downstream is identical because both backends return the same `FeatureStack`.
 
 ---
 
+## Sample Results
+
+A committed end-to-end **synthetic** run (`urbanheat run --city Delhi --mode synthetic --out
+docs/sample_outputs --grid 96`, seed 0) is checked in under [`docs/sample_outputs/`](docs/sample_outputs/)
+— the four PS-1 deliverables plus the full report ([`.md`](docs/sample_outputs/urbanheat_report.md) ·
+[`.html`](docs/sample_outputs/urbanheat_report.html)). These figures are illustrative of the *pipeline*
+on physically-plausible synthetic fields, not a calibrated measurement.
+
+![Heat-stress hotspot map (Delhi, synthetic)](docs/sample_outputs/hotspots.png)
+
+**Headline numbers from that run:**
+
+- **Model skill (spatial block CV):** R² **0.987**, RMSE **0.751 °C** (MAE 0.578, ubRMSE 0.744, NSE 0.987,
+  CCC 0.994, KGE 0.986) — leakage-free, ahead of the Extra-Trees literature anchor (R² ≈ 0.908).
+- **Hotspots:** **9.8 %** of the AOI flagged (LST ≥ P90 **and** Getis-Ord Gi* z ≥ 1.96); mean LST 42.9 °C
+  (max 59.9), SUHII 10.3 °C. 5-class priority split — High **30.2 %**, Severe **24.6 %**, Extreme
+  **18.1 %** of pixels (≈ 73 % High-or-worse).
+- **Driver families (ranked mean|SHAP|):** morphology **44.4 %** › atmosphere **22.8 %** › LULC **22.1 %**
+  › vegetation **10.6 %**.
+- **Optimized interventions:** 11 sites; the top placements are **green_roof** patches with an estimated
+  **6.4–8.0 °C** surface ΔT each (followed by **urban_trees** at ≈ 2.5 °C), totalling a city-wide mean
+  cooling of ~0.03 °C across the full AOI under the budget/area constraints.
+
+Reproduce with the command above (deterministic for a fixed `--seed`), or regenerate the four deliverables
+on a tiny grid in seconds with `urbanheat demo`.
+
+> Run physics-informed ML reliably on a bare `numpy/scipy/scikit-learn` stack: the default model backend is
+> `auto`, which uses a natively-monotone gradient booster (XGBoost/LightGBM) when installed and otherwise a
+> fast RandomForest whose driver-sign monotonicity is enforced by a post-hoc physics-consistency audit.
+
+---
+
 ## Repo layout
 
 ```

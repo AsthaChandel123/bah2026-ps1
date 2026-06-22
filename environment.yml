@@ -1,0 +1,96 @@
+# urbanheat — conda environment (ISRO BAH-2026 PS-1)
+# Mirrors requirements.txt but gets the GDAL/GEOS/PROJ stack from conda-forge for
+# a single consistent native ABI (rasterio/geopandas/rioxarray/osmnx all sit on
+# GDAL). Create with:  conda env create -f environment.yml  &&  conda activate urbanheat
+# Source: research/10_tools_ecosystem.md §5.
+name: urbanheat
+channels:
+  - conda-forge
+dependencies:
+  # ---- interpreter ----
+  - python=3.11
+
+  # ---- GDAL stack (conda-forge is strongly preferred for these) ----
+  - gdal>=3.8
+  - geos
+  - proj
+  - libspatialindex          # rtree backend
+  - rasterio>=1.3
+  - rioxarray>=0.15
+  - xarray>=2024.3
+  - geopandas>=0.14
+  - shapely>=2.0
+  - pyproj>=3.6
+  - rtree>=1.2
+  - fiona>=1.9
+  - rasterstats>=0.19
+
+  # ---- core scientific ----
+  - numpy>=1.26
+  - pandas>=2.2
+  - scipy>=1.12
+  - pyyaml>=6.0
+  - tqdm>=4.66
+  - joblib>=1.4
+
+  # ---- ML / attribution / validation ----
+  - scikit-learn>=1.4
+  - xgboost>=2.0
+  - lightgbm>=4.3
+  - shap>=0.45
+  - statsmodels>=0.14
+  - libpysal>=4.10
+  - esda>=2.5
+
+  # ---- spatial morphology / OSM ----
+  - osmnx>=1.9
+  - momepy>=0.7
+  - h3-py>=3.7
+
+  # ---- cloud-native fallback ----
+  - dask>=2024.4
+  - zarr>=2.17
+
+  # ---- visualization & app ----
+  - streamlit>=1.33
+  - folium>=0.16
+  - plotly>=5.20
+  - matplotlib>=3.8
+
+  # ---- dev / test / lint ----
+  - pytest>=8.0
+  - ruff>=0.4
+  - black>=24.0
+
+  # ---- pip-only (not on conda-forge, or fresher there) ----
+  - pip
+  - pip:
+      - earthengine-api>=1.0
+      - geemap>=0.32
+      - eemont>=0.3.6
+      - wxee>=0.4
+      - geetools>=1.0
+      - pystac-client>=0.8
+      - planetary-computer>=1.0
+      - stackstac>=0.5
+      - odc-stac>=0.3
+      - verde>=1.8
+      - spreg>=1.4
+      - catboost>=1.2
+      - pymoo>=0.6
+      - ortools>=9.9
+      - pulp>=2.8
+      - metpy>=1.6
+      - thermofeel>=2.1
+      - pythermalcomfort>=2.10
+      - leafmap>=0.32
+      - localtileserver>=0.10
+      - rio-cogeo>=5.1
+      # ---- heavy/optional: uncomment per need (prefer a separate env for InVEST) ----
+      # - mgwr>=2.2
+      # - pymc>=5.10
+      # - torch>=2.2
+      # - pytorch-lightning>=2.2
+      # - natcap.invest>=3.14
+      # - invest-ucm-calibration
+      # - supy>=2024.0

@@ -1,0 +1,99 @@
+# urbanheat — Python dependencies (ISRO BAH-2026 PS-1)
+# Target: Python 3.11 (3.10-3.12 OK; avoid 3.13 until full GDAL-stack wheels confirmed).
+# For the GDAL-backed packages PREFER conda-forge (see environment.yml). Pins are
+# loose lower bounds — resolve to latest compatible at build time, then lock.
+# Source: research/10_tools_ecosystem.md §4.
+#
+# The CORE groups below are enough to run the SYNTHETIC demo + the GEE path.
+# HEAVY/OPTIONAL groups (torch, natcap.invest, umep/supy, mgwr extras) are at the
+# bottom, commented, so the base install stays lean and credential/GPU-free.
+
+# ===== core scientific (always needed) =====
+numpy>=1.26
+pandas>=2.2
+scipy>=1.12
+pyyaml>=6.0
+tqdm>=4.66
+joblib>=1.4
+
+# ===== geospatial core (Layer C) — install via conda-forge for a clean GDAL ABI =====
+rasterio>=1.3
+rioxarray>=0.15
+xarray>=2024.3
+geopandas>=0.14
+shapely>=2.0
+pyproj>=3.6
+rtree>=1.2
+rasterstats>=0.19
+
+# ===== Google Earth Engine — server-side "O(1)" path (Layer A) =====
+earthengine-api>=1.0
+geemap>=0.32
+eemont>=0.3.6          # one-call cloud mask / scaling / spectral indices
+wxee>=0.4             # Earth Engine <-> xarray bridge
+geetools>=1.0         # batch export / asset ops (optional)
+
+# ===== cloud-native fallback (Layer B) — STAC/COG for ECOSTRESS + portability =====
+pystac-client>=0.8
+planetary-computer>=1.0
+stackstac>=0.5
+odc-stac>=0.3         # optional alternative cube loader
+dask>=2024.4
+zarr>=2.17
+
+# ===== ML / attribution / validation (Layer E) =====
+scikit-learn>=1.4
+xgboost>=2.0          # monotone_constraints = physics signs
+lightgbm>=4.3
+catboost>=1.2         # optional 3rd GBM (native categoricals: LCZ)
+shap>=0.45            # driver attribution
+statsmodels>=0.14
+verde>=1.8            # BlockKFold spatial cross-validation
+libpysal>=4.10        # spatial weights (Gi*/Moran)
+esda>=2.5             # Getis-Ord Gi*, local Moran's I (LISA)
+spreg>=1.4            # spatial regression (optional)
+
+# ===== spatial morphology / OSM (Layer C, drivers) =====
+osmnx>=1.9            # OSM streets + building footprints + morphology
+momepy>=0.7           # urban morphometrics (lambda_P, compactness, ...)
+h3>=3.7               # hex aggregation units (optional)
+
+# ===== optimization (intervention placement, Layer E) =====
+pymoo>=0.6            # NSGA-II multi-objective (cooling vs cost vs equity)
+ortools>=9.9          # ILP / CP-SAT exact site selection
+pulp>=2.8             # readable ILP (CBC) — optional
+
+# ===== thermal-comfort physics (Layer D) =====
+metpy>=1.6            # heat index, wet-bulb, dewpoint
+thermofeel>=2.1       # vectorized UTCI / WBGT / MRT (array-based)
+pythermalcomfort>=2.10  # UTCI / PET / WBGT cross-verify (optional)
+
+# ===== visualization & app (Layer F) =====
+streamlit>=1.33
+leafmap>=0.32
+folium>=0.16
+plotly>=5.20
+matplotlib>=3.8
+localtileserver>=0.10  # serve local LST rasters as tiles (optional)
+rio-cogeo>=5.1         # build COGs for tiling (optional)
+
+# ===== dev / test / lint =====
+pytest>=8.0
+ruff>=0.4
+black>=24.0
+
+# ===================================================================
+# HEAVY / OPTIONAL EXTRAS — install only when a page/module needs them
+# (also exposed as pip extras in pyproject.toml: [physics], [dl], [spatial]).
+# Keep these OUT of the lean base / app runtime image.
+# ===================================================================
+# torch>=2.2                 # PINN / CNN super-resolution (large, GPU optional) [pyproject extra: dl]
+# pytorch-lightning>=2.2     # PINN training loop
+# mgwr>=2.2                  # (multiscale) GWR coefficient maps             [pyproject extra: spatial]
+# pymc>=5.10                 # Bayesian / uncertainty-aware models
+# natcap.invest>=3.14        # InVEST Urban Cooling (degC) — pulls own GDAL/taskgraph; isolate env [extra: physics]
+# invest-ucm-calibration     # calibrate InVEST UCM to local LST
+# supy>=2024.0               # SUEWS energy balance (physics validation)
+# keplergl>=0.3              # big-data exploratory maps
+# NOTE: UMEP / SOLWEIG run as a QGIS plugin (not pip) for SVF/Tmrt; the standalone
+#       'solweig' PyPI package (Rust) gives tile-scale Tmrt if needed.
